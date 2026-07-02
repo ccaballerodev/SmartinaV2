@@ -8,6 +8,7 @@ export interface ChatState {
   isListening: boolean
   inputText: string
   isLoading: boolean
+  ttsEnabled: boolean
 }
 
 export function setupChat(root: HTMLElement) {
@@ -16,9 +17,10 @@ export function setupChat(root: HTMLElement) {
     isListening: false,
     inputText: '',
     isLoading: false,
+    ttsEnabled: false,
   }
 
-  // Configuración de Reconocimiento de Voz
+  // Configuración de Reconocimiento de Voz (Speech-to-Text)
   const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
   let recognition: any = null
   if (SpeechRecognition) {
@@ -40,10 +42,36 @@ export function setupChat(root: HTMLElement) {
       updateMicButton()
     }
 
-    recognition.onerror = () => {
+    recognition.onerror = (event: any) => {
+      console.error('[SpeechRecognition] onerror:', event.error)
       state.isListening = false
       updateMicButton()
     }
+  }
+
+  // Configuración de Síntesis de Voz (Text-to-Speech)
+  const synth: SpeechSynthesis | null = 'speechSynthesis' in window ? window.speechSynthesis : null
+
+  function speak(text: string) {
+    if (!synth || !text) return
+
+    // Si ya está hablando, cancelamos para no encimar audios
+    synth.cancel()
+
+    const utterance = new SpeechSynthesisUtterance(text)
+    utterance.lang = 'es-ES'
+    utterance.rate = 1
+    utterance.pitch = 1
+
+    utterance.onerror = (event) => {
+      console.error('[SpeechSynthesis] Error al reproducir voz:', event.error)
+    }
+
+    synth.speak(utterance)
+  }
+
+  function stopSpeaking() {
+    if (synth) synth.cancel()
   }
 
   // Selectores del DOM
@@ -51,6 +79,7 @@ export function setupChat(root: HTMLElement) {
   const inputEl = root.querySelector('.chat-input') as HTMLInputElement
   const sendBtn = root.querySelector('.chat-send')!
   const micBtn = root.querySelector('.chat-mic')!
+  const ttsBtn = root.querySelector('.chat-tts') as HTMLButtonElement
   const responseArea = root.querySelector('.model-response')!
   const modelText = root.querySelector('.model-text')!
   const chatForm = root.querySelector('.chat-form') as HTMLFormElement
@@ -75,6 +104,12 @@ export function setupChat(root: HTMLElement) {
     micBtn.setAttribute('aria-label', state.isListening ? 'Detener escucha' : 'Iniciar escucha')
   }
 
+  function updateTtsButton() {
+    ttsBtn.classList.toggle('active', state.ttsEnabled)
+    ttsBtn.setAttribute('aria-label', state.ttsEnabled ? 'Desactivar voz' : 'Activar voz')
+    ttsBtn.title = state.ttsEnabled ? 'Voz activada: click para desactivar' : 'Leer respuestas en voz alta'
+  }
+
   function updateResponse(text: string = 'Pensando...') {
     if (state.isLoading) {
       responseArea.classList.add('visible')
@@ -90,7 +125,7 @@ export function setupChat(root: HTMLElement) {
     // Escuchar el valor directamente del input por si el usuario escribió a mano
     state.inputText = inputEl.value
     const textToSend = state.inputText.trim()
-    
+
     if (!textToSend || state.isLoading) return
 
     // Mostrar mensaje del usuario en la UI inmediatamente
@@ -118,18 +153,29 @@ export function setupChat(root: HTMLElement) {
       if (response.ok) {
         // Si Flask responde bien, agregamos la respuesta de n8n
         state.messages.push({ role: 'model', text: data.reply })
+        if (state.ttsEnabled) {
+          speak(data.reply)
+        }
       } else {
         // Manejo de errores controlados desde Flask (ej: n8n caído)
-        state.messages.push({ role: 'model', text: `⚠️ Error: ${data.error || 'No se pudo procesar.'}` })
+        const errorText = `⚠️ Error: ${data.error || 'No se pudo procesar.'}`
+        state.messages.push({ role: 'model', text: errorText })
+        if (state.ttsEnabled) {
+          speak(errorText)
+        }
       }
 
     } catch (error) {
       // Manejo de errores críticos (ej: Servidor Flask totalmente apagado)
       console.error("Error al conectar con la API:", error)
-      state.messages.push({ 
-        role: 'model', 
-        text: 'No se pudo conectar con el servidor backend. Asegúrate de que Flask esté corriendo en el puerto 5000.' 
+      const errorText = 'No se pudo conectar con el servidor backend. Asegúrate de que Flask esté corriendo en el puerto 5000.'
+      state.messages.push({
+        role: 'model',
+        text: errorText
       })
+      if (state.ttsEnabled) {
+        speak(errorText)
+      }
     } finally {
       // Apagar cargador y refrescar la pantalla
       state.isLoading = false
@@ -164,15 +210,39 @@ export function setupChat(root: HTMLElement) {
     } else {
       state.inputText = ''
       updateInput()
-      recognition.start()
-      state.isListening = true
+      try {
+        recognition.start()
+        state.isListening = true
+      } catch (err) {
+        console.error('[SpeechRecognition] Error al iniciar:', err)
+        state.isListening = false
+      }
     }
     updateMicButton()
+  })
+
+  // Controlar el botón de texto a voz (TTS)
+  ttsBtn.addEventListener('click', (e) => {
+    e.preventDefault()
+
+    if (!synth) {
+      alert('Tu navegador no soporta síntesis de voz.')
+      return
+    }
+
+    state.ttsEnabled = !state.ttsEnabled
+    updateTtsButton()
+
+    // Si lo desactivan mientras está hablando, cortamos el audio de inmediato
+    if (!state.ttsEnabled) {
+      stopSpeaking()
+    }
   })
 
   // Limpiar chat al hacer click en el título
   root.querySelector('.app-title')!.addEventListener('click', () => {
     if (confirm('¿Limpiar conversación?')) {
+      stopSpeaking()
       state.messages = []
       state.inputText = ''
       state.isLoading = false
@@ -183,5 +253,6 @@ export function setupChat(root: HTMLElement) {
     }
   })
 
+  updateTtsButton()
   renderMessages()
 }

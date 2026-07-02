@@ -183,6 +183,7 @@ body {
 }
 
 .chat-mic,
+.chat-tts,
 .chat-send {
   display: inline-flex;
   align-items: center;
@@ -194,7 +195,7 @@ body {
   background: var(--bg);
   color: var(--text);
   cursor: pointer;
-  transition: background 0.2s, border-color 0.2s;
+  transition: background 0.2s, border-color 0.2s, color 0.2s;
 
   svg {
     width: 18px;
@@ -221,6 +222,12 @@ body {
 @keyframes pulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
   50% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+}
+
+.chat-tts.active {
+  background: rgba(16, 185, 129, 0.1);
+  border-color: rgba(16, 185, 129, 0.5);
+  color: var(--success);
 }
 
 .chat-send {
