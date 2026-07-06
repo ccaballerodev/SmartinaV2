@@ -169,6 +169,38 @@ body {
   z-index: 1;
 }
 
+.chat-layout {
+  flex: 1;
+  display: flex;
+  align-items: stretch;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.avatar-container {
+  flex: 0 0 auto;
+  width: 320px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(
+    180deg,
+    rgba(99, 102, 241, 0.06),
+    rgba(99, 102, 241, 0)
+  );
+}
+
+.avatar-image {
+  width: 100%;
+  max-width: 280px;
+  height: auto;
+  border-radius: 20px;
+  object-fit: contain;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+}
+
 .chat-container {
   flex: 1;
   display: flex;
@@ -592,6 +624,10 @@ body {
 
   .dashboard-header {
     padding: 12px 16px;
+  }
+
+  .avatar-container {
+    display: none;
   }
 
 .chat-form {

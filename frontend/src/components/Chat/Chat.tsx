@@ -4,6 +4,7 @@ import { useSpeechSynthesis } from "../../Hooks/useSpeechSynthesis";
 import { useSpeechRecognition } from "../../Hooks/useSpeechRecognition";
 import ChatMessage from "./ChatMessage";
 import ChatInput from "./ChatInput";
+import Avatar from "../Avatar/Avatar";
 import {
   sendToBackend,
   stopGeneration,
@@ -28,6 +29,7 @@ export default function Chat() {
     speak,
     stopSpeaking,
     synth: ttsSupported,
+    isSpeaking,
   } = useSpeechSynthesis();
 
   const {
@@ -168,7 +170,10 @@ export default function Chat() {
   };
 
   return (
-    <div className="chat-container">
+    <div className="chat-layout">
+      <Avatar talking={isSpeaking && ttsEnabled} />
+
+      <div className="chat-container">
       {messages.length === 0 ? (
         <div className="welcome-state">
           <div className="welcome-icon">S</div>
@@ -227,6 +232,7 @@ export default function Chat() {
           🗑️
         </button>
       )}
+    </div>
     </div>
   );
 }
