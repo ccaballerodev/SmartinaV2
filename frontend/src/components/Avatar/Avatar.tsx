@@ -4,9 +4,10 @@ import hablandoImg from "./hablando.png";
 
 interface AvatarProps {
   talking: boolean;
+  size?: "sidebar" | "call";
 }
 
-export default function Avatar({ talking }: AvatarProps) {
+export default function Avatar({ talking, size = "sidebar" }: AvatarProps) {
   const [frame, setFrame] = useState<"idle" | "hablando">("idle");
 
   useEffect(() => {
@@ -23,7 +24,7 @@ export default function Avatar({ talking }: AvatarProps) {
   }, [talking]);
 
   return (
-    <div className="avatar-container">
+    <div className={`avatar-container ${size === "call" ? "avatar-call" : ""}`}>
       <img
         src={frame === "idle" ? idleImg : hablandoImg}
         alt="Smartina"

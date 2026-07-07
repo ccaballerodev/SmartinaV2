@@ -5,6 +5,7 @@ import { useSpeechRecognition } from "../../Hooks/useSpeechRecognition";
 import ChatMessage from "./ChatMessage";
 import ChatInput from "./ChatInput";
 import Avatar from "../Avatar/Avatar";
+import CallMode from "../CallMode/CallMode";
 import {
   sendToBackend,
   stopGeneration,
@@ -22,6 +23,7 @@ export default function Chat() {
   const [inputText, setInputText] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [ttsEnabled, setTtsEnabled] = useState(false);
+  const [showCallMode, setShowCallMode] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -171,6 +173,16 @@ export default function Chat() {
 
   return (
     <div className="chat-layout">
+      {showCallMode && (
+        <CallMode
+          state="idle"
+          talking={false}
+          spokenText=""
+          commandPreview=""
+          onHangUp={() => setShowCallMode(false)}
+        />
+      )}
+
       <Avatar talking={isSpeaking && ttsEnabled} />
 
       <div className="chat-container">
@@ -221,6 +233,7 @@ export default function Chat() {
         ttsEnabled={ttsEnabled}
         toggleTts={toggleTts}
         isLoading={isLoading}
+        onOpenCallMode={() => setShowCallMode(true)}
       />
 
       {messages.length > 0 && (
