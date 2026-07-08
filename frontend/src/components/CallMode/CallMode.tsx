@@ -44,7 +44,7 @@ export default function CallMode({
           {spokenText || "Smartina está lista para ayudarte."}
         </p>
 
-        {commandPreview && state === "listening" && (
+        {commandPreview && (state === "listening" || state === "thinking" || state === "responding") && (
           <p className="call-command-preview">{commandPreview}</p>
         )}
       </div>

@@ -1,11 +1,14 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import type { Message } from "../../types/chat";
 import { useSpeechSynthesis } from "../../Hooks/useSpeechSynthesis";
 import { useSpeechRecognition } from "../../Hooks/useSpeechRecognition";
+import { useFSM, type FSMState } from "../../Hooks/useFSM";
+import { useWakeWordDetection } from "../../Hooks/useWakeWordDetection";
 import ChatMessage from "./ChatMessage";
 import ChatInput from "./ChatInput";
 import Avatar from "../Avatar/Avatar";
 import CallMode from "../CallMode/CallMode";
+import { type CallState } from "../CallMode/CallMode";
 import {
   sendToBackend,
   stopGeneration,
@@ -20,12 +23,16 @@ const suggestions = [
 export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isListening, setIsListening] = useState(false);
+  const [isListeningForCommand, setIsListeningForCommand] = useState(false);
   const [inputText, setInputText] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
+  const [callTranscript, setCallTranscript] = useState("");
   const [ttsEnabled, setTtsEnabled] = useState(false);
   const [showCallMode, setShowCallMode] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const commandSilenceTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined!);
+  const detectedTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined!);
+  const prevStateRef = useRef<FSMState>("IDLE");
 
   const {
     speak,
@@ -40,6 +47,192 @@ export default function Chat() {
     isSupported: sttSupported,
   } = useSpeechRecognition();
 
+  const { fsm, transition, acknowledge } = useFSM();
+
+  const handleSendMessage = useCallback(async (text?: string) => {
+    const textToSend = (text || inputText).trim();
+    console.log("[API] handleSendMessage entrada:", JSON.stringify(textToSend), "fsm:", fsm.state, "processing:", fsm.processing);
+
+    if (!textToSend) {
+      console.log("[API] handleSendMessage salida: texto vacío");
+      return;
+    }
+
+    console.log("[API] Enviando a backend:", JSON.stringify(textToSend));
+    const userMessage: Message = {
+      role: "user",
+      text: textToSend,
+      timestamp: Date.now(),
+    };
+
+    const assistantMessage: Message = {
+      role: "model",
+      text: "",
+      timestamp: Date.now() + 1,
+    };
+
+    setMessages((prev) => [
+      ...prev,
+      userMessage,
+      assistantMessage,
+    ]);
+
+    setInputText("");
+    transition("RESPONSE");
+    console.log("[API] FSM transicionado a RESPONSE");
+
+    let fullResponse = "";
+
+    await sendToBackend(textToSend, {
+      onToken(token) {
+        fullResponse += token;
+
+        setMessages((prev) => {
+          const updated = [...prev];
+
+          updated[updated.length - 1] = {
+            ...updated[updated.length - 1],
+            text: fullResponse,
+          };
+
+          return updated;
+        });
+      },
+
+      onComplete() {
+        console.log("[API] onComplete. response:", JSON.stringify(fullResponse), "ttsEnabled:", ttsEnabled, "showCallMode:", showCallMode);
+        if (fullResponse.length > 0) {
+          speak(fullResponse);
+        }
+
+        setTimeout(() => {
+          console.log("[API] Volviendo a IDLE desde RESPONSE");
+          transition("IDLE");
+          acknowledge();
+        }, 1000);
+      },
+
+      onError(error) {
+        console.log("[API] onError:", error);
+        setMessages((prev) => {
+          const updated = [...prev];
+
+          updated[updated.length - 1] = {
+            role: "model",
+            text: "⚠️ " + error,
+            timestamp: Date.now(),
+          };
+
+          return updated;
+        });
+
+        setTimeout(() => {
+          console.log("[API] Volviendo a IDLE desde error");
+          transition("IDLE");
+          acknowledge();
+        }, 1000);
+      },
+    });
+  }, [inputText, transition, acknowledge, speak, ttsEnabled, fsm, showCallMode]);
+
+  const finalizeCommand = useCallback((finalTranscript: string) => {
+    const command = finalTranscript.trim();
+    console.log("[CMD] finalizeCommand entrada:", JSON.stringify(command));
+    if (command) {
+      console.log("Comando capturado:", command);
+    }
+    setIsListeningForCommand(false);
+    stopListening();
+    console.log("[CMD] Llamando handleSendMessage con:", JSON.stringify(command));
+    transition("RESPONSE");
+    handleSendMessage(command);
+    console.log("[CMD] handleSendMessage invocado");
+  }, [stopListening, transition, handleSendMessage]);
+
+  const handleWakeWordDetected = useCallback(
+    (transcript: string) => {
+      console.log("[WW] handleWakeWordDetected:", transcript);
+      transition("ACTIVE");
+      setInputText("");
+      setIsListeningForCommand(true);
+
+      const started = startListening(
+        (cmd) => {
+          console.log("[CMD] onResult:", JSON.stringify(cmd));
+          setInputText(cmd);
+          if (commandSilenceTimerRef.current) {
+            clearTimeout(commandSilenceTimerRef.current);
+          }
+          commandSilenceTimerRef.current = setTimeout(() => {
+            console.log("[CMD] Silencio detectado, finalizando:", JSON.stringify(cmd));
+            finalizeCommand(cmd);
+          }, 2500);
+        },
+        () => {
+          const lastInput = inputText;
+          console.log("[CMD] onEnd. lastInput:", JSON.stringify(lastInput), "trim:", JSON.stringify(lastInput.trim()));
+          if (lastInput.trim()) {
+            console.log("Comando capturado:", lastInput.trim());
+          }
+          setIsListeningForCommand(false);
+        },
+        (error) => {
+          console.log("[CMD] onError:", error);
+          setIsListeningForCommand(false);
+        },
+        true
+      );
+
+      console.log("[CMD] startListening resultado:", started);
+      if (!started) {
+        setIsListeningForCommand(false);
+      }
+    },
+    [transition, startListening, finalizeCommand, inputText]
+  );
+
+  const wakeWord = useWakeWordDetection({
+    onDetected: handleWakeWordDetected,
+    commandActive: isListeningForCommand,
+  });
+
+  useEffect(() => {
+    wakeWord.startWatching();
+
+    return () => {
+      wakeWord.stopWatching();
+    };
+  }, [wakeWord]);
+
+  useEffect(() => {
+    return () => {
+      if (commandSilenceTimerRef.current) {
+        clearTimeout(commandSilenceTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    console.log("[FSM] state changed:", fsm.state, "processing:", fsm.processing, "detected:", fsm.detected);
+
+    if (fsm.state === "ACTIVE" && prevStateRef.current === "IDLE" && !showCallMode && !isListeningForCommand) {
+      console.log("[FSM] Arrancando temporizador de retorno a IDLE");
+      detectedTimerRef.current = setTimeout(() => {
+        console.log("[FSM] Timeout, volviendo a IDLE");
+        transition("IDLE");
+        acknowledge();
+      }, 4000);
+    }
+
+    prevStateRef.current = fsm.state;
+
+    return () => {
+      if (detectedTimerRef.current) {
+        clearTimeout(detectedTimerRef.current);
+      }
+    };
+  }, [fsm.state, fsm.processing, fsm.detected, transition, acknowledge, showCallMode, isListeningForCommand]);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({
       behavior: "smooth",
@@ -47,10 +240,11 @@ export default function Chat() {
   }, [messages]);
 
   const toggleListening = () => {
-    if (!sttSupported) {
-      alert("Tu navegador no soporta reconocimiento de voz.");
+    if (!sttSupported || isListeningForCommand || fsm.processing) {
       return;
     }
+
+    transition("ACTIVE");
 
     if (isListening) {
       stopListening();
@@ -90,162 +284,143 @@ export default function Chat() {
     setTtsEnabled(!ttsEnabled);
   };
 
-  const sendMessage = async (text?: string) => {
-    const textToSend = (text || inputText).trim();
-
-    if (!textToSend || isLoading) return;
-
-    const userMessage: Message = {
-      role: "user",
-      text: textToSend,
-      timestamp: Date.now(),
-    };
-
-    const assistantMessage: Message = {
-      role: "model",
-      text: "",
-      timestamp: Date.now() + 1,
-    };
-
-    setMessages((prev) => [
-      ...prev,
-      userMessage,
-      assistantMessage,
-    ]);
-
-    setInputText("");
-    setIsLoading(true);
-
-    let fullResponse = "";
-
-    await sendToBackend(textToSend, {
-      onToken(token) {
-        fullResponse += token;
-
-        setMessages((prev) => {
-          const updated = [...prev];
-
-          updated[updated.length - 1] = {
-            ...updated[updated.length - 1],
-            text: fullResponse,
-          };
-
-          return updated;
-        });
-      },
-
-      onComplete() {
-        setIsLoading(false);
-
-        if (ttsEnabled && fullResponse.length > 0) {
-          speak(fullResponse);
-        }
-      },
-
-      onError(error) {
-        setIsLoading(false);
-
-        setMessages((prev) => {
-          const updated = [...prev];
-
-          updated[updated.length - 1] = {
-            role: "model",
-            text: "⚠️ " + error,
-            timestamp: Date.now(),
-          };
-
-          return updated;
-        });
-      },
-    });
-  };
-
   const handleClearChat = () => {
     if (!confirm("¿Limpiar conversación?")) return;
+
+    if (commandSilenceTimerRef.current) {
+      clearTimeout(commandSilenceTimerRef.current);
+    }
 
     stopGeneration();
     stopSpeaking();
 
     setMessages([]);
     setInputText("");
-    setIsLoading(false);
+    setCallTranscript("");
+    setIsListeningForCommand(false);
+  };
+
+  const handleOpenCallMode = () => {
+    setShowCallMode(true);
+    setCallTranscript("");
+
+    if (sttSupported && !isListening) {
+      const started = startListening(
+        (transcript: string) => {
+          setInputText(transcript);
+          setCallTranscript(transcript);
+        },
+        () => {
+          setIsListening(false);
+        },
+        () => {
+          setIsListening(false);
+        },
+        true
+      );
+
+      if (started) {
+        setIsListening(true);
+      }
+    }
+  };
+
+  const handleHangUp = () => {
+    if (commandSilenceTimerRef.current) {
+      clearTimeout(commandSilenceTimerRef.current);
+    }
+
+    stopListening();
+    setIsListening(false);
+    setShowCallMode(false);
+    setCallTranscript("");
+    transition("IDLE");
+    acknowledge();
   };
 
   return (
     <div className="chat-layout">
-      {showCallMode && (
-        <CallMode
-          state="idle"
-          talking={false}
-          spokenText=""
-          commandPreview=""
-          onHangUp={() => setShowCallMode(false)}
-        />
-      )}
+      {showCallMode && (() => {
+        const callState: CallState =
+          fsm.state === "RESPONSE"
+            ? "responding"
+            : fsm.state === "ACTIVE" && showCallMode
+              ? "listening"
+              : "idle";
+        return (
+          <CallMode
+            state={callState}
+            talking={isSpeaking && ttsEnabled}
+            spokenText={callTranscript}
+            commandPreview={callTranscript}
+            onHangUp={handleHangUp}
+          />
+        );
+      })()}
 
-      <Avatar talking={isSpeaking && ttsEnabled} />
+      <Avatar talking={isSpeaking && (ttsEnabled || showCallMode)} />
 
       <div className="chat-container">
-      {messages.length === 0 ? (
-        <div className="welcome-state">
-          <div className="welcome-icon">S</div>
+        {messages.length === 0 ? (
+          <div className="welcome-state">
+            <div className="welcome-icon">S</div>
 
-          <h2 className="welcome-title">
-            Hola, soy Smartina
-          </h2>
+            <h2 className="welcome-title">
+              Hola, soy Smartina
+            </h2>
 
-          <p className="welcome-subtitle">
-            Asistente del Centro de Desarrollo Tecnológico
-            (CDT) Smart Regions Center.
-          </p>
+            <p className="welcome-subtitle">
+              Asistente del Centro de Desarrollo Tecnológico
+              (CDT) Smart Regions Center.
+            </p>
 
-          <div className="suggestions">
-            {suggestions.map((suggestion, idx) => (
-              <button
-                key={idx}
-                className="suggestion-chip"
-                onClick={() => sendMessage(suggestion)}
-              >
-                {suggestion}
-              </button>
-            ))}
+            <div className="suggestions">
+              {suggestions.map((suggestion, idx) => (
+                <button
+                  key={idx}
+                  className="suggestion-chip"
+                  onClick={() => handleSendMessage(suggestion)}
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
-      ) : (
-        <div className="chat-messages">
-          {messages.map((msg, idx) => (
-            <ChatMessage
-              key={idx}
-              message={msg}
-            />
-          ))}
+        ) : (
+          <div className="chat-messages">
+            {messages.map((msg, idx) => (
+              <ChatMessage
+                key={idx}
+                message={msg}
+              />
+            ))}
 
-          <div ref={messagesEndRef} />
-        </div>
-      )}
+            <div ref={messagesEndRef} />
+          </div>
+        )}
 
-      <ChatInput
-        inputText={inputText}
-        setInputText={setInputText}
-        onSendMessage={sendMessage}
-        isListening={isListening}
-        toggleListening={toggleListening}
-        ttsEnabled={ttsEnabled}
-        toggleTts={toggleTts}
-        isLoading={isLoading}
-        onOpenCallMode={() => setShowCallMode(true)}
-      />
+        <ChatInput
+          inputText={inputText}
+          setInputText={setInputText}
+          onSendMessage={handleSendMessage}
+          isListening={isListening}
+          toggleListening={toggleListening}
+          ttsEnabled={ttsEnabled}
+          toggleTts={toggleTts}
+          isLoading={fsm.processing}
+          onOpenCallMode={handleOpenCallMode}
+        />
 
-      {messages.length > 0 && (
-        <button
-          className="clear-chat-btn"
-          onClick={handleClearChat}
-          title="Limpiar conversación"
-        >
-          🗑️
-        </button>
-      )}
-    </div>
+        {messages.length > 0 && (
+          <button
+            className="clear-chat-btn"
+            onClick={handleClearChat}
+            title="Limpiar conversación"
+          >
+            🗑️
+          </button>
+        )}
+      </div>
     </div>
   );
 }
