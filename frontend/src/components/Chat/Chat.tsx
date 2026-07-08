@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import type { Message } from "../../types/chat";
 import { useSpeechSynthesis } from "../../Hooks/useSpeechSynthesis";
 import { useSpeechRecognition } from "../../Hooks/useSpeechRecognition";
+import { useVoiceInput } from "../../Hooks/useVoiceInput";
 import { useFSM, type FSMState } from "../../Hooks/useFSM";
 import { useWakeWordDetection } from "../../Hooks/useWakeWordDetection";
 import ChatMessage from "./ChatMessage";
@@ -22,7 +23,6 @@ const suggestions = [
 
 export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([]);
-  const [isListening, setIsListening] = useState(false);
   const [isListeningForCommand, setIsListeningForCommand] = useState(false);
   const [inputText, setInputText] = useState("");
   const [callTranscript, setCallTranscript] = useState("");
@@ -46,6 +46,8 @@ export default function Chat() {
     stopListening,
     isSupported: sttSupported,
   } = useSpeechRecognition();
+
+  const { isListening, toggle: toggleMic, stop: stopMic } = useVoiceInput(setInputText);
 
   const { fsm, transition, acknowledge } = useFSM();
 
@@ -193,7 +195,7 @@ export default function Chat() {
 
   const wakeWord = useWakeWordDetection({
     onDetected: handleWakeWordDetected,
-    commandActive: isListeningForCommand,
+    commandActive: isListeningForCommand || isListening,
   });
 
   useEffect(() => {
@@ -239,37 +241,13 @@ export default function Chat() {
     });
   }, [messages]);
 
-  const toggleListening = () => {
-    if (!sttSupported || isListeningForCommand || fsm.processing) {
+  const toggleListening = useCallback(() => {
+    if (isListeningForCommand || fsm.processing) {
       return;
     }
 
-    transition("ACTIVE");
-
-    if (isListening) {
-      stopListening();
-      setIsListening(false);
-      return;
-    }
-
-    setInputText("");
-
-    const started = startListening(
-      (transcript: string) => {
-        setInputText(transcript);
-      },
-      () => {
-        setIsListening(false);
-      },
-      () => {
-        setIsListening(false);
-      }
-    );
-
-    if (started) {
-      setIsListening(true);
-    }
-  };
+    toggleMic();
+  }, [isListeningForCommand, fsm.processing, toggleMic]);
 
   const toggleTts = () => {
     if (!ttsSupported) {
@@ -311,16 +289,16 @@ export default function Chat() {
           setCallTranscript(transcript);
         },
         () => {
-          setIsListening(false);
+          stopMic();
         },
         () => {
-          setIsListening(false);
+          stopMic();
         },
         true
       );
 
       if (started) {
-        setIsListening(true);
+        // el modo llamada usa su propia instancia de reconocimiento
       }
     }
   };
@@ -331,7 +309,7 @@ export default function Chat() {
     }
 
     stopListening();
-    setIsListening(false);
+    stopMic();
     setShowCallMode(false);
     setCallTranscript("");
     transition("IDLE");
