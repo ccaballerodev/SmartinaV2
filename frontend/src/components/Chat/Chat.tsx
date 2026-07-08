@@ -103,7 +103,7 @@ export default function Chat() {
 
       onComplete() {
         console.log("[API] onComplete. response:", JSON.stringify(fullResponse), "ttsEnabled:", ttsEnabled, "showCallMode:", showCallMode);
-        if (fullResponse.length > 0) {
+        if (fullResponse.length > 0 && (ttsEnabled || showCallMode)) {
           speak(fullResponse);
         }
 
@@ -308,6 +308,7 @@ export default function Chat() {
       clearTimeout(commandSilenceTimerRef.current);
     }
 
+    stopSpeaking();
     stopListening();
     stopMic();
     setShowCallMode(false);
