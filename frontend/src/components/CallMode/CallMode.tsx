@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import Avatar from "../Avatar/Avatar";
 
 export type CallState = "idle" | "listening" | "thinking" | "responding";
@@ -6,6 +7,7 @@ interface CallModeProps {
   state: CallState;
   talking: boolean;
   spokenText: string;
+  responseText: string;
   commandPreview: string;
   onHangUp: () => void;
 }
@@ -21,10 +23,25 @@ export default function CallMode({
   state,
   talking,
   spokenText,
+  responseText,
   commandPreview,
   onHangUp,
 }: CallModeProps) {
   const isListening = state === "idle" || state === "listening";
+  const isResponding = state === "thinking" || state === "responding";
+
+  const transcriptRef = useRef<HTMLParagraphElement>(null);
+
+  const displayText =
+    state === "listening"
+      ? spokenText || "Smartina está lista para ayudarte."
+      : responseText || spokenText || "Smartina está lista para ayudarte.";
+
+  useEffect(() => {
+    if (transcriptRef.current) {
+      transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
+    }
+  }, [displayText]);
 
   return (
     <div className="call-overlay">
@@ -40,8 +57,11 @@ export default function CallMode({
           <span className="call-status-text">{STATUS_TEXT[state]}</span>
         </div>
 
-        <p className="call-transcript">
-          {spokenText || "Smartina está lista para ayudarte."}
+        <p
+          ref={transcriptRef}
+          className={`call-transcript ${isResponding ? "call-response" : ""}`}
+        >
+          {displayText}
         </p>
 
         {commandPreview && (state === "listening" || state === "thinking" || state === "responding") && (

@@ -26,6 +26,7 @@ export default function Chat() {
   const [isListeningForCommand, setIsListeningForCommand] = useState(false);
   const [inputText, setInputText] = useState("");
   const [callTranscript, setCallTranscript] = useState("");
+  const [spokenReveal, setSpokenReveal] = useState("");
   const [ttsEnabled, setTtsEnabled] = useState(false);
   const [showCallMode, setShowCallMode] = useState(false);
 
@@ -45,6 +46,7 @@ export default function Chat() {
 
   const {
     speak,
+    speakProgressive,
     stopSpeaking,
     synth: ttsSupported,
     isSpeaking,
@@ -91,6 +93,7 @@ export default function Chat() {
     setInputText("");
     transition("RESPONSE");
     generatingRef.current = true;
+    setSpokenReveal("");
     console.log("[API] FSM transicionado a RESPONSE");
 
     let fullResponse = "";
@@ -120,7 +123,8 @@ export default function Chat() {
         }
         console.log("[API] onComplete. response:", JSON.stringify(fullResponse), "ttsEnabled:", ttsEnabled, "showCallMode:", showCallMode);
         if (fullResponse.length > 0 && (ttsEnabled || showCallMode)) {
-          speak(fullResponse);
+          setSpokenReveal("");
+          speakProgressive(fullResponse, setSpokenReveal);
         }
 
         idleTransitionRef.current = setTimeout(() => {
@@ -154,7 +158,7 @@ export default function Chat() {
         }, 1000);
       },
     });
-  }, [inputText, transition, acknowledge, speak, ttsEnabled, fsm, showCallMode]);
+  }, [inputText, transition, acknowledge, speakProgressive, ttsEnabled, fsm, showCallMode]);
 
   const finalizeCommand = useCallback((finalTranscript: string) => {
     if (noCommandTimerRef.current) {
@@ -432,11 +436,16 @@ export default function Chat() {
             : fsm.state === "ACTIVE" && showCallMode
               ? "listening"
               : "idle";
+        const responseText =
+          callState === "responding" || isSpeaking
+            ? spokenReveal
+            : "";
         return (
           <CallMode
             state={callState}
             talking={isSpeaking && (ttsEnabled || showCallMode)}
             spokenText={callTranscript}
+            responseText={responseText}
             commandPreview={callTranscript}
             onHangUp={handleHangUp}
           />
