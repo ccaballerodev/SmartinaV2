@@ -444,7 +444,7 @@ export default function Chat() {
           <CallMode
             state={callState}
             talking={isSpeaking && (ttsEnabled || showCallMode)}
-            spokenText={callTranscript}
+            spokenText={""}
             responseText={responseText}
             commandPreview={callTranscript}
             onHangUp={handleHangUp}
