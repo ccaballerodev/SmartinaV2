@@ -392,7 +392,7 @@ export default function Chat() {
         return (
           <CallMode
             state={callState}
-            talking={isSpeaking && ttsEnabled}
+            talking={isSpeaking && (ttsEnabled || showCallMode)}
             spokenText={callTranscript}
             commandPreview={callTranscript}
             onHangUp={handleHangUp}
