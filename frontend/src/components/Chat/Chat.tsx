@@ -36,6 +36,10 @@ export default function Chat() {
   const heardSpeechRef = useRef(false);
   const lastCommandRef = useRef("");
   const prevStateRef = useRef<FSMState>("IDLE");
+  const fsmStateRef = useRef<FSMState>("IDLE");
+  const interruptedRef = useRef(false);
+  const generatingRef = useRef(false);
+  const idleTransitionRef = useRef<ReturnType<typeof setTimeout>>(undefined!);
 
   const NO_COMMAND_TIMEOUT = 6000;
 
@@ -86,6 +90,7 @@ export default function Chat() {
 
     setInputText("");
     transition("RESPONSE");
+    generatingRef.current = true;
     console.log("[API] FSM transicionado a RESPONSE");
 
     let fullResponse = "";
@@ -107,12 +112,19 @@ export default function Chat() {
       },
 
       onComplete() {
+        generatingRef.current = false;
+        if (interruptedRef.current) {
+          console.log("[API] onComplete ignorado por interrupción del usuario");
+          interruptedRef.current = false;
+          return;
+        }
         console.log("[API] onComplete. response:", JSON.stringify(fullResponse), "ttsEnabled:", ttsEnabled, "showCallMode:", showCallMode);
         if (fullResponse.length > 0 && (ttsEnabled || showCallMode)) {
           speak(fullResponse);
         }
 
-        setTimeout(() => {
+        idleTransitionRef.current = setTimeout(() => {
+          idleTransitionRef.current = undefined!;
           console.log("[API] Volviendo a IDLE desde RESPONSE");
           transition("IDLE");
           acknowledge();
@@ -120,6 +132,7 @@ export default function Chat() {
       },
 
       onError(error) {
+        generatingRef.current = false;
         console.log("[API] onError:", error);
         setMessages((prev) => {
           const updated = [...prev];
@@ -133,7 +146,8 @@ export default function Chat() {
           return updated;
         });
 
-        setTimeout(() => {
+        idleTransitionRef.current = setTimeout(() => {
+          idleTransitionRef.current = undefined!;
           console.log("[API] Volviendo a IDLE desde error");
           transition("IDLE");
           acknowledge();
@@ -168,6 +182,20 @@ export default function Chat() {
   const handleWakeWordDetected = useCallback(
     (transcript: string) => {
       console.log("[WW] handleWakeWordDetected:", transcript);
+
+      // Siempre cortar el habla al activar Smartina (interrupción)
+      stopSpeaking();
+      if (idleTransitionRef.current) {
+        clearTimeout(idleTransitionRef.current);
+        idleTransitionRef.current = undefined!;
+      }
+
+      if (generatingRef.current) {
+        console.log("[WW] Interrumpiendo respuesta en curso");
+        interruptedRef.current = true;
+        stopGeneration();
+      }
+
       transition("ACTIVE");
       setInputText("");
       setCallTranscript("");
@@ -244,7 +272,7 @@ export default function Chat() {
         }
       }, NO_COMMAND_TIMEOUT);
     },
-    [transition, startListening, finalizeCommand, speak, showCallMode, acknowledge, stopListening]
+    [transition, startListening, finalizeCommand, speak, showCallMode, acknowledge, stopListening, stopSpeaking]
   );
 
   const wakeWord = useWakeWordDetection({
@@ -268,11 +296,16 @@ export default function Chat() {
       if (noCommandTimerRef.current) {
         clearTimeout(noCommandTimerRef.current);
       }
+      if (idleTransitionRef.current) {
+        clearTimeout(idleTransitionRef.current);
+      }
     };
   }, []);
 
   useEffect(() => {
     console.log("[FSM] state changed:", fsm.state, "processing:", fsm.processing, "detected:", fsm.detected);
+
+    fsmStateRef.current = fsm.state;
 
     if (fsm.state === "ACTIVE" && prevStateRef.current === "IDLE" && !showCallMode && !isListeningForCommand) {
       console.log("[FSM] Arrancando temporizador de retorno a IDLE");
@@ -328,9 +361,14 @@ export default function Chat() {
     if (noCommandTimerRef.current) {
       clearTimeout(noCommandTimerRef.current);
     }
+    if (idleTransitionRef.current) {
+      clearTimeout(idleTransitionRef.current);
+    }
 
     stopGeneration();
     stopSpeaking();
+    generatingRef.current = false;
+    interruptedRef.current = false;
 
     setMessages([]);
     setInputText("");
@@ -370,10 +408,15 @@ export default function Chat() {
     if (noCommandTimerRef.current) {
       clearTimeout(noCommandTimerRef.current);
     }
+    if (idleTransitionRef.current) {
+      clearTimeout(idleTransitionRef.current);
+    }
 
     stopSpeaking();
     stopListening();
     stopMic();
+    generatingRef.current = false;
+    interruptedRef.current = false;
     setShowCallMode(false);
     setCallTranscript("");
     transition("IDLE");
