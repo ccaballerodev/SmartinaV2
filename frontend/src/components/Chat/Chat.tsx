@@ -32,7 +32,12 @@ export default function Chat() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const commandSilenceTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined!);
   const detectedTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined!);
+  const noCommandTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined!);
+  const heardSpeechRef = useRef(false);
+  const lastCommandRef = useRef("");
   const prevStateRef = useRef<FSMState>("IDLE");
+
+  const NO_COMMAND_TIMEOUT = 6000;
 
   const {
     speak,
@@ -138,49 +143,76 @@ export default function Chat() {
   }, [inputText, transition, acknowledge, speak, ttsEnabled, fsm, showCallMode]);
 
   const finalizeCommand = useCallback((finalTranscript: string) => {
+    if (noCommandTimerRef.current) {
+      clearTimeout(noCommandTimerRef.current);
+    }
     const command = finalTranscript.trim();
     console.log("[CMD] finalizeCommand entrada:", JSON.stringify(command));
-    if (command) {
-      console.log("Comando capturado:", command);
-    }
     setIsListeningForCommand(false);
     stopListening();
-    console.log("[CMD] Llamando handleSendMessage con:", JSON.stringify(command));
-    transition("RESPONSE");
-    handleSendMessage(command);
-    console.log("[CMD] handleSendMessage invocado");
-  }, [stopListening, transition, handleSendMessage]);
+    lastCommandRef.current = "";
+
+    if (command) {
+      console.log("Comando capturado:", command);
+      console.log("[CMD] Llamando handleSendMessage con:", JSON.stringify(command));
+      transition("RESPONSE");
+      handleSendMessage(command);
+      console.log("[CMD] handleSendMessage invocado");
+    } else {
+      console.log("[CMD] Sin comando, volviendo a IDLE");
+      transition("IDLE");
+      acknowledge();
+    }
+  }, [stopListening, transition, handleSendMessage, acknowledge]);
 
   const handleWakeWordDetected = useCallback(
     (transcript: string) => {
       console.log("[WW] handleWakeWordDetected:", transcript);
       transition("ACTIVE");
       setInputText("");
+      setCallTranscript("");
+      lastCommandRef.current = "";
+      heardSpeechRef.current = false;
       setIsListeningForCommand(true);
 
       const started = startListening(
         (cmd) => {
           console.log("[CMD] onResult:", JSON.stringify(cmd));
+          heardSpeechRef.current = true;
+          if (noCommandTimerRef.current) {
+            clearTimeout(noCommandTimerRef.current);
+          }
+          lastCommandRef.current = cmd;
           setInputText(cmd);
+          setCallTranscript(cmd);
           if (commandSilenceTimerRef.current) {
             clearTimeout(commandSilenceTimerRef.current);
           }
           commandSilenceTimerRef.current = setTimeout(() => {
             console.log("[CMD] Silencio detectado, finalizando:", JSON.stringify(cmd));
-            finalizeCommand(cmd);
+            finalizeCommand(lastCommandRef.current);
           }, 2500);
         },
         () => {
-          const lastInput = inputText;
-          console.log("[CMD] onEnd. lastInput:", JSON.stringify(lastInput), "trim:", JSON.stringify(lastInput.trim()));
-          if (lastInput.trim()) {
-            console.log("Comando capturado:", lastInput.trim());
+          console.log("[CMD] onEnd. comando:", JSON.stringify(lastCommandRef.current.trim()));
+          if (commandSilenceTimerRef.current) {
+            clearTimeout(commandSilenceTimerRef.current);
           }
-          setIsListeningForCommand(false);
+          if (noCommandTimerRef.current) {
+            clearTimeout(noCommandTimerRef.current);
+          }
+          if (lastCommandRef.current.trim()) {
+            finalizeCommand(lastCommandRef.current);
+          } else {
+            setIsListeningForCommand(false);
+          }
         },
         (error) => {
           console.log("[CMD] onError:", error);
           setIsListeningForCommand(false);
+          if (noCommandTimerRef.current) {
+            clearTimeout(noCommandTimerRef.current);
+          }
         },
         true
       );
@@ -188,9 +220,31 @@ export default function Chat() {
       console.log("[CMD] startListening resultado:", started);
       if (!started) {
         setIsListeningForCommand(false);
+        return;
       }
+
+      if (noCommandTimerRef.current) {
+        clearTimeout(noCommandTimerRef.current);
+      }
+      noCommandTimerRef.current = setTimeout(() => {
+        console.log("[CMD] No se recibió comando tras la palabra de activación");
+        if (commandSilenceTimerRef.current) {
+          clearTimeout(commandSilenceTimerRef.current);
+        }
+        heardSpeechRef.current = false;
+        lastCommandRef.current = "";
+        setIsListeningForCommand(false);
+        stopListening();
+        transition("IDLE");
+        acknowledge();
+        if (showCallMode) {
+          speak(
+            "¿Estás ahí? No dijiste nada. Di 'Smartina' nuevamente para activarme."
+          );
+        }
+      }, NO_COMMAND_TIMEOUT);
     },
-    [transition, startListening, finalizeCommand, inputText]
+    [transition, startListening, finalizeCommand, speak, showCallMode, acknowledge, stopListening]
   );
 
   const wakeWord = useWakeWordDetection({
@@ -210,6 +264,9 @@ export default function Chat() {
     return () => {
       if (commandSilenceTimerRef.current) {
         clearTimeout(commandSilenceTimerRef.current);
+      }
+      if (noCommandTimerRef.current) {
+        clearTimeout(noCommandTimerRef.current);
       }
     };
   }, []);
@@ -268,6 +325,9 @@ export default function Chat() {
     if (commandSilenceTimerRef.current) {
       clearTimeout(commandSilenceTimerRef.current);
     }
+    if (noCommandTimerRef.current) {
+      clearTimeout(noCommandTimerRef.current);
+    }
 
     stopGeneration();
     stopSpeaking();
@@ -306,6 +366,9 @@ export default function Chat() {
   const handleHangUp = () => {
     if (commandSilenceTimerRef.current) {
       clearTimeout(commandSilenceTimerRef.current);
+    }
+    if (noCommandTimerRef.current) {
+      clearTimeout(noCommandTimerRef.current);
     }
 
     stopSpeaking();
