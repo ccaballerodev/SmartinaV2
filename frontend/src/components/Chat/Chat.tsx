@@ -42,6 +42,8 @@ export default function Chat() {
   const generatingRef = useRef(false);
   const idleTransitionRef = useRef<ReturnType<typeof setTimeout>>(undefined!);
 
+  const sessionIdRef = useRef("");
+
   const NO_COMMAND_TIMEOUT = 6000;
 
   const {
@@ -98,7 +100,10 @@ export default function Chat() {
 
     let fullResponse = "";
 
-    await sendToBackend(textToSend, {
+    await sendToBackend(
+      textToSend, 
+      sessionIdRef.current,
+      {
       onToken(token) {
         fullResponse += token;
 
@@ -283,6 +288,25 @@ export default function Chat() {
     onDetected: handleWakeWordDetected,
     commandActive: isListeningForCommand || isListening,
   });
+
+  useEffect(() => {
+
+    let sessionId = sessionStorage.getItem("smartina_session");
+
+    if (!sessionId) {
+
+      sessionId = crypto.randomUUID();
+
+      sessionStorage.setItem(
+        "smartina_session",
+        sessionId
+      );
+
+    }
+
+    sessionIdRef.current = sessionId;
+
+  }, []);
 
   useEffect(() => {
     wakeWord.startWatching();

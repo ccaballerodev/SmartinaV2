@@ -35,11 +35,18 @@ def chat():
 
     user_message = data.get("chatInput", "").strip()
 
+    session_id = data.get("sessionId", "").strip()
+
     if not user_message:
         return jsonify({"error": "El mensaje no puede estar vacío"}), 400
 
+
+    if not session_id:
+        return jsonify({"error": "Session ID requerido"}), 400
+
     payload = {
-        "chatInput": user_message
+        "chatInput": user_message,
+        "sessionId": session_id,   
     }
 
     def generate():
