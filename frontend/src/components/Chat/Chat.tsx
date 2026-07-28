@@ -481,8 +481,6 @@ export default function Chat() {
       <div className="chat-container">
         {messages.length === 0 ? (
           <div className="welcome-state">
-            <div className="welcome-icon">S</div>
-
             <h2 className="welcome-title">
               Hola, soy Smartina
             </h2>
