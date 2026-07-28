@@ -21,7 +21,7 @@ CORS(
 
 N8N_WEBHOOK_URL = os.getenv(
     "N8N_WEBHOOK_URL",
-    "http://localhost:5678/pones-tu-webhook-aqui"
+    "http://localhost:5678/n8n_main_webhook"
 )
 
 N8N_UPLOAD_WEBHOOK = os.getenv(
